@@ -23,6 +23,22 @@ def exp_lr_scheduler(optimizer, epoch, init_lr=0.001, lr_decay_epoch=500):
 
     return optimizer
 
+def sqnorm(a):
+    return np.sum( a*a )
+
+def get_distances(initial_maps,final_maps):
+    results = []
+    for a,b in zip(initial_maps,final_maps):
+        res = sqnorm(a-b)/(sqnorm(a) + sqnorm(b))
+        results += [res]
+    return(results)
+
+def get_weights(net):
+    weights = []
+    for m in net.modules():
+        if isinstance(m, nn.Conv2d):
+            weights += [m.weight.data.cpu().numpy()]
+    return weights
 
 def fit(net,
         img_noisy_var,
@@ -45,6 +61,8 @@ def fit(net,
         totalupsample = 1,
         loss_type="MSE",
         output_gradients=False,
+        output_weights=False,
+        show_images=False,
        ):
 
     if net_input is not None:
@@ -102,7 +120,9 @@ def fit(net,
     
     out_grads = np.zeros((nconvnets,num_iter))
         
-        
+    init_weights = get_weights(net)
+    out_weights = np.zeros(( len(init_weights) ,num_iter))
+    
     for i in range(num_iter):
         
         if lr_decay_epoch is not 0:
@@ -142,9 +162,17 @@ def fit(net,
             if i % 10 == 0:
                 out2 = net(Variable(net_input_saved).type(dtype))
                 loss2 = mse(out2, img_clean_var)
-                #print ('Iteration %05d    Train loss %f  Actual loss %f Actual loss orig %f  Noise Energy %f' % (i, loss.data[0],true_loss.data[0],loss2.data[0],noise_energy.data[0]), '\r', end='')
                 print ('Iteration %05d    Train loss %f  Actual loss %f Actual loss orig %f' % (i, loss.data,true_loss.data,loss2.data), '\r', end='')
-
+            
+            if show_images:
+                if i % 50 == 0:
+                    print(i)
+                    out_img_np = net( ni.type(dtype) ).data.cpu().numpy()[0]
+                    myimgshow(plt,out_img_np)
+                    plt.show()
+            
+            if output_weights:
+                out_weights[:,i] = np.array( get_distances( init_weights, get_weights(net) ) )
             
             return loss   
         
@@ -159,10 +187,14 @@ def fit(net,
         
     if find_best:
         net = best_net
-    if output_gradients:
+    if output_gradients and output_weights:
         return mse_wrt_noisy, mse_wrt_truth,net_input_saved, net, out_grads
+    elif output_gradients:
+        return mse_wrt_noisy, mse_wrt_truth,net_input_saved, net, out_grads      
+    elif output_weights:
+        return mse_wrt_noisy, mse_wrt_truth,net_input_saved, net, out_weights
     else:
-        return mse_wrt_noisy, mse_wrt_truth,net_input_saved, net        
+        return mse_wrt_noisy, mse_wrt_truth,net_input_saved, net       
         
 
 

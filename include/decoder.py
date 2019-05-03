@@ -32,6 +32,7 @@ def decodernw(
         bn_affine = True,
         bn = True,
         upsample_first = True,
+        bias=False
         ):
     
     num_channels_up = num_channels_up + [num_channels_up[-1],num_channels_up[-1]]
@@ -45,7 +46,7 @@ def decodernw(
     for i in range(len(num_channels_up)-1):
         
         if upsample_first:
-            model.add(conv( num_channels_up[i], num_channels_up[i+1],  filter_size_up[i], 1, pad=pad))
+            model.add(conv( num_channels_up[i], num_channels_up[i+1],  filter_size_up[i], 1, pad=pad, bias=bias))
             if upsample_mode!='none' and i != len(num_channels_up)-2:
                 model.add(nn.Upsample(scale_factor=2, mode=upsample_mode))
             #model.add(nn.functional.interpolate(size=None,scale_factor=2, mode=upsample_mode))	
@@ -53,7 +54,7 @@ def decodernw(
             if upsample_mode!='none' and i!=0:
                 model.add(nn.Upsample(scale_factor=2, mode=upsample_mode))
             #model.add(nn.functional.interpolate(size=None,scale_factor=2, mode=upsample_mode))	
-            model.add(conv( num_channels_up[i], num_channels_up[i+1],  filter_size_up[i], 1, pad=pad))        
+            model.add(conv( num_channels_up[i], num_channels_up[i+1],  filter_size_up[i], 1, pad=pad,bias=bias))        
         
         if i != len(num_channels_up)-1:	
             if(bn_before_act and bn): 
@@ -63,7 +64,7 @@ def decodernw(
             if( (not bn_before_act) and bn):
                 model.add(nn.BatchNorm2d( num_channels_up[i+1], affine=bn_affine))
     
-    model.add(conv( num_channels_up[-1], num_output_channels, 1, pad=pad))
+    model.add(conv( num_channels_up[-1], num_output_channels, 1, pad=pad,bias=bias))
     if need_sigmoid:
         model.add(nn.Sigmoid())
     
@@ -150,6 +151,18 @@ def set_to(tensor,mtx):
                 tensor[i,j] = np_to_tensor(np.zeros(mtx.shape))
     return tensor
 
+def conv2(in_f, out_f, kernel_size, stride=1, pad='zero',bias=False):
+    padder = None
+    to_pad = int((kernel_size - 1) / 2)
+
+    if kernel_size != 4:
+        convolver = nn.Conv2d(in_f, out_f, kernel_size, stride, padding=to_pad, bias=bias)
+    else:
+        padder = nn.ReflectionPad2d( (1,0,1,0) )
+        convolver = nn.Conv2d(in_f, out_f, kernel_size, stride, padding=1, bias=bias)
+    layers = filter(lambda x: x is not None, [padder, convolver])
+    return nn.Sequential(*layers)
+
 def fixed_decodernw(
         num_output_channels=3, 
         num_channels_up=[128]*5, 
@@ -167,10 +180,10 @@ def fixed_decodernw(
     
     model = nn.Sequential()
    
-    for i in range(len(num_channels_up)-1):
+    for i in range(len(num_channels_up)-2):
         
         # those will be fixed
-        model.add(conv( num_channels_up[i], num_channels_up[i],  5, 1, pad=pad))  
+        model.add(conv2( num_channels_up[i], num_channels_up[i],  4, 1, pad=pad))  
         # those will be learned
         model.add(conv( num_channels_up[i], num_channels_up[i+1],  1, 1, pad=pad))  
         
