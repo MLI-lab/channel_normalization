@@ -5,3 +5,4 @@ from .visualize import *
 from .fit import *
 from .helpers import *
 from .compression import *
+from .multi_channel import *

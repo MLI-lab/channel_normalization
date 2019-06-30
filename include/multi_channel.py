@@ -18,6 +18,7 @@ else:
     
     
     
+    
 
 def pad_circular1d(x, pad):
     x = torch.cat([x, x[0:pad]])
@@ -44,60 +45,6 @@ class Pad1d(torch.nn.Module):
         for i in range(x.shape[1]):
             xx[0,i] = pad_circular1d(x[0,i],self.pad)
         return xx # pad_circular1d(x, self.pad)
-
-    
-    
-    
-def print_filters(net):
-    for m in net.modules():
-        if isinstance(m, nn.Conv1d):
-            print(m.weight.data.cpu().numpy())  
-
-def plot_gradients(out_grads):
-    for i,g in enumerate(out_grads):
-        plt.semilogy(g,label=str(i)) 
-    plt.legend()
-    plt.show()
-
-
-def initialize(net):
-    for m in net.modules():
-        if isinstance(m, nn.Conv1d):
-            if m.weight.data.shape[2]>1:
-                m.weight.data[0,0,0] = 0
-                m.weight.data[0,0,1] = 1
-                m.weight.data[0,0,2] = 2
-
-
-                
-def conv(in_f, out_f, kernel_size, stride=1,bias=False,pad=True):
-    '''
-    Circular convolution
-    '''
-    to_pad = int((kernel_size - 1) / 2)
-    if pad:
-        padder = Pad1d(to_pad)
-    else:
-        padder = None
-
-    #convolver = nn.utils.weight_norm(nn.Conv1d(in_f, out_f, kernel_size, stride, padding=0, bias=bias), name='weight')
-    convolver = nn.Conv1d(in_f, out_f, kernel_size, stride, padding=0, bias=bias)
-    
-    layers = filter(lambda x: x is not None, [padder, convolver])
-    return nn.Sequential(*layers).type(dtype)
-
-
-
-
-def initialize(net):
-    for m in net.modules():
-        if isinstance(m, nn.Conv1d):
-            if m.weight.data.shape[2]>1:
-                m.weight.data[0,0,0] = 0
-                m.weight.data[0,0,1] = 1
-                m.weight.data[0,0,2] = 1
-                m.weight.data[0,0,3] = 0
-                m.weight.data[0,0,4] = 0
 
 class ChannelNormalization(torch.nn.Module):
     '''
@@ -144,12 +91,13 @@ class ChannelNormalization(torch.nn.Module):
         return xx
     
     
-    
-def conv2(in_f, out_f, kernel_size, stride=1,bias=False,pad=True):
+def conv(in_f, out_f, kernel_size, stride=1,bias=False,pad=True):
+    '''
+    Circular convolution
+    '''
     to_pad = int((kernel_size - 1) / 2)
     if pad:
         padder = Pad1d(to_pad)
-        padder = nn.ReflectionPad1d(to_pad)
     else:
         padder = None
 
@@ -158,6 +106,8 @@ def conv2(in_f, out_f, kernel_size, stride=1,bias=False,pad=True):
     
     layers = filter(lambda x: x is not None, [padder, convolver])
     return nn.Sequential(*layers).type(dtype)
+
+
 
 class ResidualBlock(nn.Module):
     def __init__(self, in_f, out_f, kernel_size, stride=1,bias=False,pad=True,mode="BN"):
@@ -201,11 +151,10 @@ def decnet(
     if modeout != "none":
         model.add(ChannelNormalization(num_channels_up[i+1],mode=modeout))
         #model.add( nn.BatchNorm1d( num_channels_up[i+1] ,affine=True) )
-    model.add(conv( num_channels_up[-1], num_output_channels, 1,bias=True,pad=False))
-    model.add(nn.Sigmoid())
+    model.add(conv(num_channels_up[-1], num_output_channels, 1, bias=True,pad=False))
+    # model.add(nn.Sigmoid())
     
     return model
-
 
 
 
@@ -223,8 +172,9 @@ def fit(net,
         length = int(y.data.shape[2])
         shape = [1,num_channels[0], length ]
         print("input shape: ", shape)
-        net_input = Variable(torch.zeros(shape)).type(dtype)
+        net_input = Variable(torch.ones(shape)).type(dtype)
         net_input.data.uniform_()
+        
     
     net_input = net_input.type(dtype)
     net_input_saved = net_input.data.clone()
@@ -234,7 +184,7 @@ def fit(net,
     mse_wrt_noisy = np.zeros(num_iter)
      
     print("optimize with SGD", LR)
-    optimizer = torch.optim.SGD(p, lr=LR,momentum=0.9)
+    optimizer = torch.optim.SGD(p, lr=LR,momentum=0)
     
     mse = torch.nn.MSELoss() #.type(dtype) 
    
@@ -244,7 +194,7 @@ def fit(net,
     
     out_grads = np.zeros((nconvnets,num_iter))
     out_filters = np.zeros((nconvnets+1,num_iter))
-        
+    init_para = np.zeros((9,nconvnets+1))
     for i in range(num_iter):
         def closure():
             optimizer.zero_grad()
@@ -264,8 +214,11 @@ def fit(net,
             for m in net.modules():
                 if isinstance(m, nn.Conv1d):
                     out_filters[ind,i] = m.weight.data.norm(2).item()
+                    if i == 0:
+                        init_para[:,ind] = m.weight.data.numpy()[0,0]
                     ind += 1
-                    #print(m.weight.data.cpu().numpy())  
+                    #print(m.weight.data.cpu().numpy()) 
+        
                    
             if i % 10 == 0:
                 print ('Iteration %05d    Train loss %f' % (i, loss.data), '\r', end='')
@@ -275,7 +228,3 @@ def fit(net,
         loss = optimizer.step(closure)
                   
     return mse_wrt_noisy, net_input, net, out_grads, out_filters
-
-
-
-
